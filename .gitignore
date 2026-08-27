@@ -1,0 +1,13 @@
+@'
+venv/
+__pycache__/
+*.py[cod]
+.env
+data/raw/
+data/processed/
+models/
+.ipynb_checkpoints/
+.vscode/
+*.log
+.DS_Store
+'@ | Out-File -Encoding utf8 .gitignore
