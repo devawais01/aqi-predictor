@@ -7,6 +7,7 @@ Handles the two things that silently break naive implementations:
 import io
 import json
 import math
+import time
 from typing import Any, Optional
 
 import pandas as pd
@@ -67,16 +68,45 @@ def _to_records(df: pd.DataFrame) -> list[dict]:
     ]
 
 
-def _upsert(table: str, records: list[dict], chunk_size: int = 500) -> int:
-    """Upsert records in chunks, keyed on timestamp. Returns rows written."""
+def _upsert(table: str, records: list[dict], chunk_size: int = 500,
+            max_retries: int = 5) -> int:
+    """Upsert records in chunks, keyed on timestamp.
+
+    Each chunk is retried with exponential backoff. Because the upsert is
+    idempotent, a retry after a partial failure is always safe: rows already
+    written are simply overwritten with identical values.
+    """
     client = get_client()
     written = 0
     total = len(records)
+
     for start in range(0, total, chunk_size):
         chunk = records[start : start + chunk_size]
-        client.table(table).upsert(chunk, on_conflict="timestamp").execute()
+        delay = 2.0
+        last_error = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                client.table(table).upsert(chunk, on_conflict="timestamp").execute()
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries:
+                    print(f"    chunk at {start} failed (attempt {attempt}): "
+                          f"{type(exc).__name__}; retrying in {delay:.0f}s")
+                    time.sleep(delay)
+                    delay *= 2
+
+        if last_error is not None:
+            raise RuntimeError(
+                f"Upsert failed at row {start} after {max_retries} attempts: "
+                f"{last_error}"
+            ) from last_error
+
         written += len(chunk)
         print(f"  uploaded {written}/{total} rows to {table}")
+
     return written
 
 
