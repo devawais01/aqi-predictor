@@ -42,6 +42,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy requests python-dotenv supabase pytz \
                       scikit-learn xgboost statsmodels joblib tensorflow-cpu
+                      
+      - name: Create runtime directories
+        run: mkdir -p data/processed data/raw models reports/figures
 
       - name: Train models and update registry
         env:
