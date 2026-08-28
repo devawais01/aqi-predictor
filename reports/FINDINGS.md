@@ -595,3 +595,85 @@ Enforced before any write to Supabase; the backfill aborts on failure.
 - [ ] Streamlit dashboard with alerts
 - [ ] GitHub Actions: hourly feature, daily training
 - [ ] Final report assembly
+
+---
+
+# PART III — Final Model Selection
+
+## 13. CV-Aware Selection (supersedes §8.6)
+
+Selection was changed from lowest single-split RMSE to highest mean
+walk-forward CV R2, with RMSE as fallback for models lacking CV. The
+criteria disagreed at **all three horizons**.
+
+| Horizon | Lowest RMSE | Best CV R2 | **Selected** |
+|---|---|---|---|
+| +24h | Random Forest (24.92, CV 0.534) | XGBoost (25.35, CV 0.551) | **XGBoost** |
+| +48h | Random Forest (32.58, CV 0.126) | Ridge (32.73, CV 0.242) | **Ridge** |
+| +72h | Random Forest (33.34, CV **−0.045**) | Ridge (33.43, CV **+0.166**) | **Ridge** |
+
+At +72h Random Forest wins the single split by 0.09 RMSE while scoring a
+**negative** mean CV R2 — across five seasonal folds it is on average worse
+than predicting the mean. Ridge loses the split by that same 0.09 and stays
+positive throughout. Trading 0.09 RMSE for seasonal robustness is an easy
+decision, and it is only visible because CV was run.
+
+### 13.1 Artifact sizes after reselection
+
+| Horizon | Model | Size |
+|---|---|---|
+| +24h | XGBoost | 0.53 MB |
+| +48h | Ridge | < 0.01 MB |
+| +72h | Ridge | < 0.01 MB |
+
+Ridge serialises to a scaler plus 70 coefficients. The more robust model is
+also roughly 10,000x smaller than the Random Forest it replaced, which
+matters for the 1 GB memory ceiling on Streamlit Community Cloud.
+
+## 14. Why fold 1 fails: a training-data-volume result
+
+Fold boundaries, +72h target:
+
+| Fold | Trains through | Tests | History available |
+|---|---|---|---|
+| 1 | 2025-06-13 | Jun–Sep 2025 | ~9.5 months |
+| 2 | 2025-09-07 | Sep–Dec 2025 | ~12 months |
+| 3 | 2025-12-03 | Dec–Feb 2026 | ~15 months |
+| 4 | 2026-02-27 | Feb–May 2026 | ~18 months |
+| 5 | 2026-05-25 | May–Aug 2026 | ~21 months |
+
+Fold 1 has seen one monsoon and **zero complete winters**. Tree R2 at +72h:
+−0.945 (fold 1) → 0.240 (fold 2) → 0.351 (fold 3). Performance stabilises
+once a full annual cycle is in the training window.
+
+**This independently validates the two-year backfill decision.** A project
+using 30 or 90 days of data would be permanently in fold 1's regime.
+
+## 15. LSTM run-to-run instability
+
+The LSTM produced materially different scores across two runs on identical
+data with the same seed:
+
+| Horizon | Run 1 R2 | Run 2 R2 |
+|---|---|---|
+| +24h | 0.496 | 0.522 |
+| +48h | 0.382 | 0.310 |
+| +72h | 0.348 | 0.153 |
+
+Sources: oneDNN's non-deterministic floating-point operation ordering, and
+early stopping halting at different epochs. A swing of 0.20 R2 at +72h means
+a single LSTM measurement is not a reliable basis for model selection — a
+further argument for the CV-based criterion, and a limitation to state
+plainly rather than hide by reporting only the favourable run.
+
+## 16. Final production configuration
+
+| Horizon | Model | Test RMSE | Test R2 | CV R2 | vs persistence |
+|---|---|---|---|---|---|
+| +24h | XGBoost | 25.35 | 0.602 | 0.551 | +24.1% |
+| +48h | Ridge | 32.73 | 0.337 | 0.242 | +17.0% |
+| +72h | Ridge | 33.43 | 0.309 | 0.166 | +17.0% |
+
+All three beat persistence. At +72h the baseline scores R2 = −0.002 while
+the deployed model reaches 0.309 on the test split and remains positive
+across every seasonal fold on average.

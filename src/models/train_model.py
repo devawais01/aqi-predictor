@@ -296,10 +296,47 @@ def train_horizon(df: pd.DataFrame, features: list[str], horizon: int,
     return results, artifacts
 
 
-def select_best(results: list[dict]) -> dict:
-    """Lowest test RMSE among the trained models, excluding the baseline."""
+def select_best(results: list[dict], criterion: str = "cv") -> dict:
+    """Choose the model for a horizon.
+
+    Two criteria are available:
+
+      "rmse"  lowest single-split test RMSE
+      "cv"    highest mean walk-forward CV R2, falling back to RMSE for
+              models that were not cross-validated
+
+    The default is "cv". A single 80/20 split on two years of strongly
+    seasonal data places the whole test set in one season, and our results
+    show this misleads: at +72h Random Forest wins the single split
+    (R2 0.313) while scoring a NEGATIVE mean CV R2 (-0.045), whereas Ridge
+    loses the split (0.309) but stays positive across folds (+0.166).
+    Robustness across seasons is the more useful property in deployment.
+    """
     candidates = [r for r in results if r["model"] != "Persistence"]
-    return min(candidates, key=lambda r: r["rmse"])
+    if not candidates:
+        raise ValueError("No trained models to select from.")
+
+    if criterion == "rmse":
+        return min(candidates, key=lambda r: r["rmse"])
+
+    with_cv = [r for r in candidates if pd.notna(r.get("cv_r2_mean"))]
+    if not with_cv:
+        return min(candidates, key=lambda r: r["rmse"])
+
+    best_cv = max(with_cv, key=lambda r: r["cv_r2_mean"])
+    best_rmse = min(candidates, key=lambda r: r["rmse"])
+
+    if best_cv["model"] != best_rmse["model"]:
+        print(f"\n  NOTE: selection criteria disagree.")
+        print(f"    lowest RMSE   : {best_rmse['model']:<16} "
+              f"RMSE {best_rmse['rmse']:.2f}, "
+              f"CV R2 {best_rmse.get('cv_r2_mean', float('nan')):.3f}")
+        print(f"    best CV R2    : {best_cv['model']:<16} "
+              f"RMSE {best_cv['rmse']:.2f}, "
+              f"CV R2 {best_cv['cv_r2_mean']:.3f}")
+        print(f"    -> selecting {best_cv['model']} for seasonal robustness")
+
+    return best_cv
 
 def save_artifacts(artifacts: dict, horizon: int, best_name: str,
                    features: list[str], upload: bool) -> list[str]:
@@ -350,6 +387,9 @@ def save_artifacts(artifacts: dict, horizon: int, best_name: str,
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train all AQI models.")
+
+    parser.add_argument("--select-by", choices=["cv", "rmse"], default="cv",
+                        help="Model selection criterion (default: cv)")
     parser.add_argument("--skip-sarimax", action="store_true",
                         help="Skip SARIMAX (slow: rolling Kalman filter)")
     parser.add_argument("--skip-lstm", action="store_true",
@@ -395,7 +435,7 @@ def main() -> int:
         )
         all_results.extend(results)
 
-        best = select_best(results)
+        best = select_best(results, criterion=args.select_by)
         best_per_horizon[horizon] = best
         print(f"\n  WINNER +{horizon}h: {best['model']} "
               f"(RMSE {best['rmse']:.2f}, R2 {best['r2']:.3f})")
