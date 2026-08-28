@@ -500,6 +500,7 @@ def main() -> int:
         db_client.upload_json(history[-60:], "training_history.json")
         print("Registry updated.")
 
+    os.makedirs("data/processed", exist_ok=True)
     table.to_csv("data/processed/model_comparison.csv", index=False)
     print("Wrote data/processed/model_comparison.csv")
     print("\nTraining complete.")
