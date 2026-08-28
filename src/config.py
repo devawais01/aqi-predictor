@@ -20,9 +20,27 @@ TIMEZONE = "Asia/Karachi"          # UTC+5, no daylight saving
 # --------------------------------------------------------------------------
 # Credentials
 # --------------------------------------------------------------------------
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-OPENWEATHER_API_KEY = os.environ.get("OPENWEATHER_API_KEY")
+def _secret(name: str) -> str | None:
+    """Resolve a credential from the environment, then Streamlit secrets.
+
+    Locally and in GitHub Actions the value comes from the environment.
+    On Streamlit Community Cloud there is no .env file, so it falls back to
+    st.secrets. The import is guarded because streamlit is not installed in
+    the training workflow.
+    """
+    value = os.environ.get(name)
+    if value:
+        return value
+    try:
+        import streamlit as st
+        return st.secrets.get(name)
+    except Exception:
+        return None
+
+
+SUPABASE_URL = _secret("SUPABASE_URL")
+SUPABASE_KEY = _secret("SUPABASE_KEY")
+OPENWEATHER_API_KEY = _secret("OPENWEATHER_API_KEY")
 
 # --------------------------------------------------------------------------
 # Supabase objects

@@ -9,3 +9,5 @@ __pycache__/
 .vscode/
 *.log
 .DS_Store
+.streamlit/secrets.toml
+data/processed/latest_forecast.json

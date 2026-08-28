@@ -1,0 +1,17 @@
+# Training-time dependencies. Installed by training_pipeline.yml only.
+# Includes everything in requirements.txt plus the model families and
+# analysis tools that are not needed to serve a forecast.
+
+-r requirements.txt
+
+statsmodels>=0.14
+tensorflow-cpu>=2.15
+shap>=0.44
+matplotlib>=3.7
+seaborn>=0.13
+
+fastapi>=0.109
+uvicorn>=0.27
+jupyter>=1.0
+jupytext>=1.16
+nbconvert>=7.0

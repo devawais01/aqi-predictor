@@ -1,19 +1,21 @@
+# Runtime dependencies for the Streamlit dashboard.
+#
+# TensorFlow is deliberately EXCLUDED. Streamlit Community Cloud allocates
+# roughly 1 GB of memory and importing TensorFlow consumes a large share of
+# it before any data is loaded. The deployed models are XGBoost (+24h) and
+# Ridge (+48h, +72h); neither requires it. TensorFlow is installed only in
+# the training workflow, where the LSTM is trained for comparison.
+
 pandas>=2.0
 numpy>=1.24
 requests>=2.31
 python-dotenv>=1.0
 supabase>=2.3
+pytz>=2024.1
+
 scikit-learn>=1.3
 xgboost>=2.0
-statsmodels>=0.14
-tensorflow>=2.15
 joblib>=1.3
-shap>=0.44
+
 streamlit>=1.30
 plotly>=5.18
-matplotlib>=3.7
-seaborn>=0.13
-fastapi>=0.109
-uvicorn>=0.27
-pytz>=2024.1
-jupyter>=1.0
