@@ -143,6 +143,24 @@ def build_inference_row(lookback_days: int = 14,
     print(f"  {len(forecast_weather)} forecast hours, "
           f"to {forecast_weather.index.max()}")
 
+    # dominant_pollutant is a string, so feature_columns() excludes it and the
+    # feature store never receives it. Recompute it from the EPA sub-index
+    # columns, which are numeric and therefore are stored.
+    if "dominant_pollutant" not in frame.columns:
+        sub_index_columns = [
+            f"{pollutant}_aqi" for pollutant in calc.BREAKPOINTS
+            if f"{pollutant}_aqi" in frame.columns
+        ]
+        if sub_index_columns:
+            winner = frame[sub_index_columns].idxmax(axis=1)
+            frame["dominant_pollutant"] = winner.map(
+                lambda name: calc.DISPLAY_NAME.get(
+                    str(name).replace("_aqi", ""), None
+                ) if pd.notna(name) else None
+            )
+        else:
+            frame["dominant_pollutant"] = None
+
     # Perfect prognosis: the stored rows carry archived actuals (or nulls at
     # the tail). Overwrite with the live forecast for the latest row.
     now = frame.index.max()

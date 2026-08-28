@@ -970,3 +970,98 @@ afternoons when photochemical production peaks and particulates disperse.
 A mid-afternoon August reading is exactly when this is expected, and it
 confirms the dominant-pollutant logic responds to conditions rather than
 returning a constant.
+
+---
+
+# PART VII — Automation and End-to-End Verification
+
+## 26. GitHub Actions workflows
+
+| Workflow | Schedule | Purpose |
+|---|---|---|
+| `feature_pipeline.yml` | `5 * * * *` (hourly) | Fetch observations, upsert raw, rebuild feature tail |
+| `training_pipeline.yml` | `30 0 * * *` (daily) | Retrain all models, select by CV, update registry |
+
+Both support `workflow_dispatch` for manual runs. `concurrency` groups
+prevent overlapping executions from causing duplicate upserts. The feature
+workflow runs at five past the hour rather than on the hour, because
+GitHub's scheduler is heavily contended at `:00` and jobs are delayed.
+
+### 26.1 First manual run — verified success
+
+Run 33164957197, 2026-08-28 10:52 UTC, duration **46 seconds**:
+
+Fetching recent observations from Open-Meteo...
+179 rows, 2026-08-21 00:00 -> 2026-08-28 10:00
+uploaded 179/179 rows to raw_observations
+
+Reading raw history for the rebuild window...
+rebuilding from 504 rows (2026-08-07 11:00 -> 2026-08-28 10:00)
+
+--- Leakage audit ---
+6 rolling means shifted: OK
+rolling std shifted: OK
+aqi_change_rate shifted: OK
+8 AQI lags aligned: OK
+future columns limited to perfect-prog weather: OK
+Audit passed.
+
+70 feature columns, 3 targets, 336 rows
+uploaded 336/336 rows to feature_store
+
+raw_observations rows: 17675
+latest raw timestamp : 2026-08-28 10:00:00+00:00
+
+
+Row count rose from 17,544 to **17,675** — 131 genuinely new hourly
+observations ingested and engineered without manual intervention.
+
+### 26.2 The leakage audit runs in CI
+
+`audit_leakage()` executes inside the hourly workflow, so a future change
+that breaks the `.shift(1)` discipline fails the pipeline rather than
+silently writing compromised features. This is the difference between a
+one-off check and an enforced invariant.
+
+## 27. End-to-end verification
+
+With the hourly workflow running, `predict.py` uses the **primary** path:
+
+Reading latest features from Supabase feature store...
+17507 rows, latest 2026-08-28 10:00:00+00:00 (1.0h old)
+Fetching live weather forecast...
+120 forecast hours, to 2026-09-01 23:00:00+00:00
+
+Current: AQI 170 (Unhealthy), dominant O3
++24h AQI 170.7 Unhealthy [XGBoost]
++48h AQI 182.3 Unhealthy [Ridge]
++72h AQI 165.8 Unhealthy [Ridge]
+
+
+No staleness warning, no fallback. The complete chain is operational:
+
+**GitHub Actions (hourly) → Supabase feature store → model registry →
+inference → FastAPI / Streamlit.**
+
+## 28. A bug only the full pipeline could expose
+
+Switching from the fallback path to the feature-store path immediately
+raised `KeyError: 'dominant_pollutant'`.
+
+**Cause.** `dominant_pollutant` is a string. `feature_columns()` filters to
+numeric dtypes, so the column was silently excluded from the jsonb payload
+written to the feature store. The live fallback path computed it fresh and
+therefore had it; the store path did not. The two paths were producing
+subtly different frames, and until the hourly workflow made the store
+current, the store path was never exercised.
+
+**Fix.** Recompute `dominant_pollutant` at inference from the EPA sub-index
+columns (`pm2_5_aqi`, `ozone_aqi`, …), which are numeric and therefore *are*
+persisted, via `argmax` over the sub-indices.
+
+**Lesson for the report.** A dual-path design — primary store plus live
+fallback — improves availability but creates a class of bug where the less-
+travelled path silently diverges. The fallback was exercised on every run
+during development precisely because the store was stale, which masked the
+defect in the path that matters. Divergence between paths should be tested
+directly, not discovered when the primary path finally activates.
