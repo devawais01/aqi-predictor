@@ -225,16 +225,40 @@ def fetch_features() -> pd.DataFrame:
 # --------------------------------------------------------------------------
 # Model registry
 # --------------------------------------------------------------------------
-def upload_artifact(local_path: str, remote_name: str) -> None:
-    """Upload a model artifact to the registry bucket, overwriting if present."""
+def upload_artifact(local_path: str, remote_name: str) -> bool:
+    """Upload an artifact, overwriting any existing object of the same name.
+
+    Storage rejects a plain upload when the key exists, so a 409 falls back
+    to update. Failures are reported but never abort training: the artifacts
+    are already on local disk.
+    """
     client = get_client()
-    with open(local_path, "rb") as handle:
-        client.storage.from_(config.MODEL_BUCKET).upload(
+    try:
+        with open(local_path, "rb") as handle:
+            payload = handle.read()
+    except OSError as exc:
+        print(f"    could not read {local_path}: {exc}")
+        return False
+
+    bucket = client.storage.from_(config.MODEL_BUCKET)
+    try:
+        bucket.upload(
             path=remote_name,
-            file=handle.read(),
+            file=payload,
             file_options={"cache-control": "3600", "upsert": "true"},
         )
-    print(f"  uploaded {remote_name}")
+        return True
+    except Exception:
+        try:
+            bucket.update(
+                path=remote_name,
+                file=payload,
+                file_options={"cache-control": "3600", "upsert": "true"},
+            )
+            return True
+        except Exception as exc:
+            print(f"    upload failed for {remote_name}: {exc}")
+            return False
 
 
 def download_artifact(remote_name: str, local_path: str) -> Optional[str]:
@@ -250,16 +274,22 @@ def download_artifact(remote_name: str, local_path: str) -> Optional[str]:
     return local_path
 
 
-def upload_json(obj: Any, remote_name: str) -> None:
+def upload_json(obj: Any, remote_name: str) -> bool:
     """Serialise an object to JSON and upload it to the registry."""
     client = get_client()
     payload = json.dumps(obj, indent=2, default=str).encode("utf-8")
-    client.storage.from_(config.MODEL_BUCKET).upload(
-        path=remote_name,
-        file=payload,
-        file_options={"content-type": "application/json", "upsert": "true"},
-    )
-    print(f"  uploaded {remote_name}")
+    options = {"content-type": "application/json", "upsert": "true"}
+    bucket = client.storage.from_(config.MODEL_BUCKET)
+    try:
+        bucket.upload(path=remote_name, file=payload, file_options=options)
+        return True
+    except Exception:
+        try:
+            bucket.update(path=remote_name, file=payload, file_options=options)
+            return True
+        except Exception as exc:
+            print(f"    upload failed for {remote_name}: {exc}")
+            return False
 
 
 def download_json(remote_name: str) -> Optional[Any]:
