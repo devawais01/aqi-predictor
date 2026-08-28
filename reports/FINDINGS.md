@@ -677,3 +677,107 @@ plainly rather than hide by reporting only the favourable run.
 All three beat persistence. At +72h the baseline scores R2 = −0.002 while
 the deployed model reaches 0.309 on the test split and remains positive
 across every seasonal fold on average.
+
+
+---
+
+# PART IV — SHAP Explainability
+
+Computed on **1,000 test rows** (2026-07-09 to 2026-08-19), not a single
+observation. TreeExplainer for XGBoost, LinearExplainer for Ridge — both
+exact methods for their model class.
+
+## 17. Feature-group contribution by horizon
+
+Percentage of total mean |SHAP| attributable to each design group:
+
+| Group | +24h | +48h | +72h |
+|---|---|---|---|
+| EPA sub-indices | **32.4%** | 14.9% | 18.4% |
+| Current pollutants | 19.9% | 15.2% | 14.3% |
+| **Future weather (perfect prog)** | **13.4%** | **24.2%** | **25.2%** |
+| AQI lags | 13.4% | 13.5% | 11.3% |
+| Current weather | 8.1% | 14.0% | 12.2% |
+| AQI rolling | 5.3% | 11.9% | 13.1% |
+| Time (cyclic) | 5.9% | 4.9% | 4.4% |
+| Derived | 1.6% | 1.5% | 1.0% |
+
+### 17.1 The headline result
+
+Current pollutant state (sub-indices + pollutants combined) falls from
+**52.3% at +24h to 32.7% at +72h**, while future weather rises from
+**13.4% to 25.2%** — it nearly doubles and becomes the largest single group
+at both longer horizons.
+
+This is the perfect-prognosis design measured rather than asserted. Without
+the forecast-weather features the +48h and +72h models would lose roughly a
+quarter of their explanatory basis, which is consistent with SARIMAX (which
+has no exogenous inputs) scoring R2 = −0.251 at +72h.
+
+## 18. Top features by horizon
+
+**+24h (XGBoost)** — dominated by present conditions:
+
+| Rank | Feature | Mean \|SHAP\| |
+|---|---|---|
+| 1 | us_aqi | 9.82 |
+| 2 | pm2_5 | 8.13 |
+| 3 | computed_aqi | 5.36 |
+| 4 | pm2_5_aqi | 4.57 |
+| 5 | surface_pressure | 2.59 |
+| 6 | pm10 | 2.50 |
+| 7 | temperature_2m_t24 | 2.26 |
+
+**+48h (Ridge)** — future weather takes the top slot:
+
+| Rank | Feature | Mean \|SHAP\| |
+|---|---|---|
+| 1 | **temperature_2m_t48** | 12.63 |
+| 2 | relative_humidity_2m | 11.95 |
+| 3 | **relative_humidity_2m_t48** | 9.98 |
+| 4 | temperature_2m | 9.52 |
+| 5 | aqi_roll_72 | 7.11 |
+
+**+72h (Ridge)** — a weather forecast is the single most important input:
+
+| Rank | Feature | Mean \|SHAP\| |
+|---|---|---|
+| 1 | **relative_humidity_2m_t72** | 11.82 |
+| 2 | pm10 | 11.01 |
+| 3 | us_aqi | 10.23 |
+| 4 | relative_humidity_2m | 9.71 |
+| 5 | temperature_2m | 9.66 |
+| 6 | dust | 9.39 |
+| 7 | aqi_roll_72 | 9.19 |
+| 8 | **temperature_2m_t72** | 9.10 |
+
+At +72h the top-ranked feature is a *forecast* value, not an observation.
+
+## 19. Physical interpretation
+
+The SHAP rankings match the correlation structure found in EDA and are
+physically coherent:
+
+- **Humidity and temperature at the target hour** dominate long horizons.
+  Cold, humid, stagnant conditions are exactly the winter-inversion regime
+  identified in §3.5 (temperature r = −0.361, pressure r = +0.357).
+- **`surface_pressure` ranks 5th at +24h** despite modest raw correlation —
+  high pressure signals stagnation and suppressed dispersion.
+- **`aqi_roll_72` and `aqi_roll_168` rise with horizon** (5.3% → 13.1% of
+  total importance), confirming §4.1: short horizons are momentum, long
+  horizons are regime.
+- **`dust` ranks 6th at +72h** but is negligible at +24h. Dust intrusions
+  are synoptic-scale and develop over days, so they carry more information
+  about conditions three days out than one day out.
+
+## 20. Limitation of this analysis
+
+The 1,000-row sample covers 2026-07-09 to 2026-08-19 — six weeks of summer,
+chosen as the most recent contiguous block of the test set. Feature
+importance in January, when AQI averages 220 and PM2.5 dominates 87% of
+hours, would likely weight current pollutants more heavily and future
+weather less. A seasonally stratified SHAP analysis is future work.
+
+Figures: `08_shap_beeswarm_t{24,48,72}.png`,
+`09_shap_bar_t{24,48,72}.png`. Machine-readable summary in
+`models/shap_summary.json`, also uploaded to the Supabase registry.
