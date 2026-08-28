@@ -1065,3 +1065,102 @@ travelled path silently diverges. The fallback was exercised on every run
 during development precisely because the store was stale, which masked the
 defect in the path that matters. Divergence between paths should be tested
 directly, not discovered when the primary path finally activates.
+
+
+---
+
+# PART VIII — Final Production Results (CI-trained)
+
+Trained by GitHub Actions run 89887382623, 2026-08-28 11:57 UTC, on 17,507
+rows read from the Supabase feature store. Both training and SHAP steps
+completed successfully. This is the authoritative results table.
+
+## 29. Model comparison
+
+### +24h — persistence baseline RMSE 33.33, R² 0.310
+
+| Model | RMSE | MAE | R² | vs base | CV R² |
+|---|---|---|---|---|---|
+| Ridge | 25.11 | 18.16 | 0.608 | +24.6% | 0.536 |
+| Random Forest | 25.17 | 18.09 | 0.606 | +24.5% | 0.534 |
+| **XGBoost (deployed)** | 25.24 | 17.69 | 0.604 | +24.3% | **0.557** |
+| LSTM | 30.54 | 20.34 | 0.419 | +8.4% | n/a |
+
+### +48h — persistence baseline RMSE 39.17, R² 0.043
+
+| Model | RMSE | MAE | R² | vs base | CV R² |
+|---|---|---|---|---|---|
+| LSTM | 31.59 | 21.94 | 0.375 | +19.4% | n/a |
+| Random Forest | 32.15 | 23.35 | 0.355 | +17.9% | 0.171 |
+| **Ridge (deployed)** | 32.47 | 22.29 | 0.342 | +17.1% | **0.245** |
+| XGBoost | 33.30 | 23.96 | 0.308 | +15.0% | 0.073 |
+
+### +72h — persistence baseline RMSE 39.92, R² **−0.001**
+
+| Model | RMSE | MAE | R² | vs base | CV R² |
+|---|---|---|---|---|---|
+| Random Forest | 32.53 | 24.11 | 0.336 | +18.5% | 0.097 |
+| XGBoost | 32.87 | 23.81 | 0.322 | +17.7% | 0.040 |
+| **Ridge (deployed)** | 33.17 | 23.12 | 0.309 | +16.9% | **0.190** |
+| LSTM | 35.00 | 25.30 | 0.231 | +12.3% | n/a |
+
+**Every model beats persistence at every horizon.**
+
+## 30. Are these scores good? (defence of the results)
+
+1. **Persistence is the only meaningful reference.** Current AQI is a model
+   input, so any model can score respectably by echoing it. At +72h that
+   echo scores R² = −0.001 — worse than predicting the mean. The deployed
+   model reaches 0.309. The entire gap is attributable to feature
+   engineering.
+
+2. **These figures are consistent with operational systems.** Published AQI
+   forecast systems typically report R² in the 0.3–0.6 range at 24–72h.
+   +24h at 0.604 is at the upper end; +72h at 0.309 is within it.
+
+3. **A high R² would be the suspicious result.** The reference project
+   reported 0.85 while forecasting one hour ahead, where autocorrelation is
+   0.992, and while retaining features containing the current value. That
+   measured autocorrelation, not skill.
+
+4. **The information ceiling is measurable.** AQI autocorrelation decays
+   0.768 → 0.615 → 0.552 across the three horizons. Predictability at +72h
+   is bounded by the physics, and what remains comes largely from forecast
+   weather.
+
+## 31. SHAP on CI-trained models
+
+Feature-group contribution at +72h (Ridge):
+
+| Group | Share |
+|---|---|
+| **Future weather (perfect prognosis)** | **29.6%** |
+| EPA sub-indices | 19.0% |
+| Current weather | 13.8% |
+| Current pollutants | 13.0% |
+| AQI lags | 9.8% |
+| AQI rolling | 9.4% |
+| Time (cyclic) | 4.2% |
+| Derived | 1.2% |
+
+Future weather rose from 25.2% to **29.6%** on the retrained model — the
+single largest group at +72h. Top features: `relative_humidity_2m_t72`,
+`temperature_2m_t72`, `nitrogen_dioxide_aqi`.
+
+## 32. Why CI needs `mkdir -p`
+
+`data/`, `models/` and generated figures are gitignored — they hold
+generated artifacts, and committing 5 MB model binaries would bloat the
+repository. A GitHub runner is a fresh machine each run, so those
+directories do not exist after checkout.
+
+Two runs failed with
+`OSError: Cannot save file into a non-existent directory: 'data/processed'`
+on the final line of the training script, *after* all models had trained
+and the registry had been updated. Fixed at source with
+`os.makedirs(..., exist_ok=True)`, plus a `mkdir -p` workflow step as a
+guard.
+
+**Lesson:** code that runs on a developer machine can silently depend on
+directory state created weeks earlier. CI, being stateless, is the only
+place that assumption gets tested.
