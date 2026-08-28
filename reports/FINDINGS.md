@@ -879,3 +879,94 @@ Behaviour confirmed:
 
 Every value shown is the direct output of a model trained for that specific
 horizon. Nothing is interpolated, tiled, noise-injected or bias-anchored.
+
+---
+
+# PART VI — Serving Layer
+
+## 25. FastAPI service
+
+Eight endpoints, all verified returning HTTP 200 against a live Supabase
+backend on 2026-08-28.
+
+| Endpoint | Purpose | Verified response |
+|---|---|---|
+| `GET /` | Service metadata, endpoint index | 200 |
+| `GET /health` | Liveness + dependency checks | `status: healthy`, `raw_rows: 17544`, `missing_horizons: []` |
+| `GET /predict` | Live 3-day forecast | 200 |
+| `GET /current` | Current conditions only | AQI 160, Unhealthy, dominant O3 |
+| `GET /historical` | Recent observations, 24–720h | 500h returned, 41,220 bytes |
+| `GET /metrics` | Model performance from registry | 200 |
+| `GET /models` | Selected model per horizon + rationale | 598 bytes |
+| `GET /alerts` | Active health alerts | 4 alerts, max severity 2 |
+
+Interactive OpenAPI documentation is auto-generated at `/docs`.
+
+### 25.1 `/health` — dependency verification
+
+```json
+{
+  "status": "healthy",
+  "checks": {
+    "supabase": { "ok": true, "raw_rows": 17544 },
+    "models": { "ok": true, "missing_horizons": [] }
+  }
+}
+```
+
+The health check queries Supabase directly and confirms a model artifact
+exists for every horizon, so a degraded deployment is detectable rather
+than failing silently at request time.
+
+### 25.2 `/models` — selection transparency
+
+```json
+{
+  "selected": {
+    "+24h": { "model": "XGBoost", "n_features": 70 },
+    "+48h": { "model": "Ridge",   "n_features": 70 },
+    "+72h": { "model": "Ridge",   "n_features": 70 }
+  },
+  "selection_criterion": "Highest mean walk-forward CV R2 across 5 expanding folds..."
+}
+```
+
+The API states *why* each model was chosen, not merely which. Selection
+logic is inspectable by any consumer.
+
+### 25.3 `/alerts` — health guidance
+
+Live response, 2026-08-28 09:37 UTC:
+
+| When | Valid at (local) | AQI | Level | Severity |
+|---|---|---|---|---|
+| now | 2026-08-28 14:00 | 160.0 | unhealthy | 2 |
+| +24h | 2026-08-29 14:00 | 155.1 | unhealthy | 2 |
+| +48h | 2026-08-30 14:00 | 177.2 | unhealthy | 2 |
+| +72h | 2026-08-31 14:00 | 159.8 | unhealthy | 2 |
+
+Four active alerts, maximum severity 2. Tiers follow EPA breakpoints:
+101 sensitive, 151 unhealthy, 201 very unhealthy, 301 hazardous.
+
+### 25.4 Design notes
+
+- **15-minute response cache.** Upstream data is hourly; recomputing a
+  forecast per request would waste Open-Meteo quota and add latency for no
+  benefit. `/metrics` uses a 1-hour TTL.
+- **CORS enabled, GET only.** Allows the Streamlit dashboard to call the
+  API directly from the browser while restricting write methods.
+- **Errors return 503 with detail**, not a stack trace, so an upstream
+  outage is distinguishable from a bug.
+
+### 25.5 Live cross-check of the AQI calculator
+
+`/current` at 14:00 local reported `us_aqi` 160 against our
+`computed_aqi` of 164 — a 4-point difference, consistent with the 0.9908
+correlation measured in §2.
+
+The dominant pollutant was **O3**, not PM2.5. This is not an error: §3.6
+established that ozone dominates 11.7% of hours, concentrated on hot sunny
+afternoons when photochemical production peaks and particulates disperse.
+A mid-afternoon August reading is exactly when this is expected, and it
+confirms the dominant-pollutant logic responds to conditions rather than
+returning a constant.
