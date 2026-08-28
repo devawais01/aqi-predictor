@@ -181,7 +181,8 @@ def group_importance(importance: pd.Series) -> pd.Series:
 def main() -> int:
     parser = argparse.ArgumentParser(description="SHAP explanations.")
     parser.add_argument("--sample", type=int, default=SAMPLE_SIZE)
-    parser.add_argument("--from-csv", action="store_true", default=True)
+    parser.add_argument("--from-csv", action="store_true",
+                        help="Read features from local CSV instead of Supabase")
     parser.add_argument("--no-upload", action="store_true")
     args = parser.parse_args()
 
@@ -189,9 +190,15 @@ def main() -> int:
     print("SHAP EXPLAINABILITY")
     print("=" * 70)
 
-    df = pd.read_csv("data/processed/features.csv",
-                     index_col="timestamp", parse_dates=["timestamp"])
-    df.index = pd.to_datetime(df.index, utc=True)
+    if args.from_csv:
+        print("Loading features from local CSV...")
+        df = pd.read_csv("data/processed/features.csv",
+                         index_col="timestamp", parse_dates=["timestamp"])
+        df.index = pd.to_datetime(df.index, utc=True)
+    else:
+        print("Loading features from Supabase feature store...")
+        config.validate_credentials()
+        df = db_client.fetch_features()
     df = df.sort_index()
     features = bf.feature_columns(df)
     print(f"{len(df):,} rows, {len(features)} features")

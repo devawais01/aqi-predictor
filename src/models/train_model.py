@@ -44,6 +44,10 @@ from src.utils import db_client
 
 warnings.filterwarnings("ignore")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+# oneDNN parallelises float ops non-deterministically across threads, which
+# made LSTM scores swing by up to 0.55 R2 between identical runs. Disabling
+# it costs some speed and buys reproducibility.
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 
 MODEL_DIR = "models"
 LSTM_LOOKBACK = 24
@@ -155,6 +159,11 @@ def fit_lstm(X_train, y_train, X_test, y_test, lookback: int = LSTM_LOOKBACK):
     import tensorflow as tf
 
     tf.random.set_seed(42)
+    np.random.seed(42)
+    try:
+        tf.config.experimental.enable_op_determinism()
+    except Exception:
+        pass
     tf.get_logger().setLevel("ERROR")
 
     x_scaler = StandardScaler()
@@ -313,6 +322,15 @@ def select_best(results: list[dict], criterion: str = "cv") -> dict:
     Robustness across seasons is the more useful property in deployment.
     """
     candidates = [r for r in results if r["model"] != "Persistence"]
+    if criterion == "cv" and not any(
+        pd.notna(r.get("cv_r2_mean")) for r in candidates
+    ):
+        raise ValueError(
+            "Selection criterion is 'cv' but no model was cross-validated. "
+            "Re-run without --skip-cv, or pass --select-by rmse explicitly. "
+            "Falling back to RMSE silently would select a model our own "
+            "results show to be seasonally unstable."
+        )
     if not candidates:
         raise ValueError("No trained models to select from.")
 

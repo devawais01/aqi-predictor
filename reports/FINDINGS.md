@@ -695,7 +695,7 @@ Percentage of total mean |SHAP| attributable to each design group:
 |---|---|---|---|
 | EPA sub-indices | **32.4%** | 14.9% | 18.4% |
 | Current pollutants | 19.9% | 15.2% | 14.3% |
-| **Future weather (perfect prog)** | **13.4%** | **24.2%** | **25.2%** |
+| **Future weather (perfect prog)** | **13.4%** | **24.1%** | **25.2%** |
 | AQI lags | 13.4% | 13.5% | 11.3% |
 | Current weather | 8.1% | 14.0% | 12.2% |
 | AQI rolling | 5.3% | 11.9% | 13.1% |
@@ -732,24 +732,24 @@ has no exogenous inputs) scoring R2 = −0.251 at +72h.
 
 | Rank | Feature | Mean \|SHAP\| |
 |---|---|---|
-| 1 | **temperature_2m_t48** | 12.63 |
-| 2 | relative_humidity_2m | 11.95 |
-| 3 | **relative_humidity_2m_t48** | 9.98 |
-| 4 | temperature_2m | 9.52 |
+| 1 | **temperature_2m_t48** | 12.68 |
+| 2 | relative_humidity_2m | 11.81 |
+| 3 | **relative_humidity_2m_t48** | 10.04 |
+| 4 | temperature_2m | 9.34 |
 | 5 | aqi_roll_72 | 7.11 |
 
 **+72h (Ridge)** — a weather forecast is the single most important input:
 
 | Rank | Feature | Mean \|SHAP\| |
 |---|---|---|
-| 1 | **relative_humidity_2m_t72** | 11.82 |
-| 2 | pm10 | 11.01 |
-| 3 | us_aqi | 10.23 |
+| 1 | **relative_humidity_2m_t72** | 11.93 |
+| 2 | pm10 | 10.92 |
+| 3 | us_aqi | 9.88 |
 | 4 | relative_humidity_2m | 9.71 |
 | 5 | temperature_2m | 9.66 |
 | 6 | dust | 9.39 |
 | 7 | aqi_roll_72 | 9.19 |
-| 8 | **temperature_2m_t72** | 9.10 |
+| 8 | **temperature_2m_t72** | 9.17 |
 
 At +72h the top-ranked feature is a *forecast* value, not an observation.
 
@@ -781,3 +781,101 @@ weather less. A seasonally stratified SHAP analysis is future work.
 Figures: `08_shap_beeswarm_t{24,48,72}.png`,
 `09_shap_bar_t{24,48,72}.png`. Machine-readable summary in
 `models/shap_summary.json`, also uploaded to the Supabase registry.
+
+---
+
+# PART V — Feature Store Verification and Final Selection
+
+## 21. Training verified against the Supabase feature store
+
+All earlier runs used `--from-csv` for speed. The pipeline was re-run reading
+from the Supabase `feature_store` table (17,376 rows, 70 features from the
+jsonb column). Results matched the CSV path to within run-to-run noise,
+confirming the two paths are equivalent and that the guideline requirement
+— training reads from the feature store — is met.
+
+## 22. Final selection (CV-based, from the feature store)
+
+| Horizon | Selected | RMSE | R2 | CV R2 | Rejected alternative |
+|---|---|---|---|---|---|
+| +24h | **XGBoost** | 25.72 | 0.590 | **0.561** | RF: RMSE 24.90, CV 0.541 |
+| +48h | **Ridge** | 32.73 | 0.337 | **0.242** | LSTM: RMSE 26.64, CV n/a |
+| +72h | **Ridge** | 33.43 | 0.309 | **+0.166** | RF: CV −0.001, XGB: CV −0.047 |
+
+At +48h the LSTM produced the lowest RMSE of any model (26.64, R2 0.563) and
+was still rejected, because it has no cross-validation score and its
+single-run results are not stable (§23).
+
+A guard was added so that `--skip-cv` combined with CV-based selection now
+raises rather than silently falling back to RMSE — which on one occasion
+selected Random Forest at +48h, a model with CV R2 0.156 against Ridge's
+0.242.
+
+## 23. LSTM run-to-run instability (quantified)
+
+The same LSTM, same data, same seed, at the +48h horizon across four runs:
+
+| Run | R2 | RMSE |
+|---|---|---|
+| 1 | 0.382 | 31.66 |
+| 2 | 0.310 | 33.47 |
+| 3 | 0.007 | 40.15 |
+| 4 | 0.563 | 26.64 |
+
+**Range: 0.556 R2.** Causes:
+
+1. **oneDNN non-determinism.** TensorFlow parallelises floating-point
+   operations across threads; summation order varies between runs, and small
+   numerical differences accumulate over 30 epochs. `tf.random.set_seed`
+   fixes initialisation but not this.
+2. **Early stopping amplification.** With `patience=5` and
+   `restore_best_weights=True`, a small numerical difference shifts which
+   epoch records the best validation loss, so genuinely different weights
+   are restored.
+
+Mitigation applied: `TF_ENABLE_ONEDNN_OPTS=0` and
+`tf.config.experimental.enable_op_determinism()`, which trade some speed for
+reproducibility.
+
+**This instability is itself a result.** A model whose measured performance
+varies by 0.556 R2 across identical runs cannot be selected on a single
+measurement. It is the strongest argument in this project for cross-
+validated selection, and the reason the LSTM was not deployed at any horizon
+despite winning one single-split comparison.
+
+Full mitigation — training 5–10 seeds per horizon and averaging, plus
+extending walk-forward CV to the LSTM — was scoped at roughly 30 minutes per
+horizon and deferred as future work. The deep-learning requirement is
+satisfied by a correctly-implemented sequence model
+(input shape `(n, 24, 70)`); it is simply not the selected model.
+
+## 24. Live inference verified
+
+`python -m src.models.predict` output, 2026-08-28 09:00 UTC:
+
+
+Reading latest features from Supabase feature store...
+17376 rows, latest 2026-08-22 23:00 (130.2h old)
+stale (> 3h); falling back to live computation
+
+Current: AQI 160 (Unhealthy), dominant O3
++24h AQI 155.1 Unhealthy [XGBoost]
++48h AQI 177.2 Unhealthy [Ridge]
++72h AQI 159.8 Unhealthy [Ridge]
+
+
+
+Behaviour confirmed:
+
+- Feature store is the **primary** source; the staleness check triggered
+  correctly because the hourly GitHub Action does not yet exist.
+- Fallback to live computation is reported in the `feature_source` field
+  rather than hidden.
+- Future-weather columns are filled from the live Open-Meteo forecast
+  (perfect prognosis), since archived actuals for t+24/48/72 do not exist.
+- Feature names and **order** are read from the training metadata, not
+  recomputed at inference — a mismatch here caused a hard failure that was
+  caught and fixed.
+
+Every value shown is the direct output of a model trained for that specific
+horizon. Nothing is interpolated, tiled, noise-injected or bias-anchored.
