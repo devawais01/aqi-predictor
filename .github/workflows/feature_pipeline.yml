@@ -10,7 +10,8 @@ name: Feature Pipeline
 
 on:
   schedule:
-    - cron: '5 * * * *'      # five past every hour
+    - cron: '5 * * * *'       # hourly, best effort
+    - cron: '25 */3 * * *'    # every 3 hours, fallback      # five past every hour
   workflow_dispatch:          # manual trigger from the Actions tab
 
 concurrency:

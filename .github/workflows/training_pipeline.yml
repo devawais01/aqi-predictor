@@ -10,7 +10,8 @@ name: Training Pipeline
 
 on:
   schedule:
-    - cron: '30 0 * * *'
+    - cron: '30 0 * * *'      # daily 00:30 UTC (05:30 PKT)
+    - cron: '45 12 * * *'     # daily 12:45 UTC, fallback
   workflow_dispatch:
     inputs:
       skip_lstm:
