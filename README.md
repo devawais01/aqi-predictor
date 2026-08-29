@@ -501,6 +501,29 @@ Both support `workflow_dispatch` for manual runs. Concurrency groups prevent ove
 
 The feature workflow runs at **:05 past the hour**, not on the hour — GitHub's scheduler is heavily contended at `:00` and jobs get delayed.
 
+### Scheduler reliability in practice
+
+GitHub documents scheduled workflows as **best-effort** — they may be delayed or dropped under load, and high-frequency crons sit in the most contended tier. Observed over a 17-hour window:
+
+| Run | Trigger | Time (UTC) | Rows written |
+|---|---|---|---|
+| #1 | Manual | 2026-08-28 10:52 | 131 |
+| #2 | **Scheduled** | 2026-08-28 21:19 | 11 |
+| #3 | **Scheduled** | 2026-08-29 03:33 | 6 |
+
+Two scheduled runs, not seventeen.
+
+**This produces no data gaps.** Each run fetches a **seven-day trailing window** and upserts on `timestamp`, so a missed hour is backfilled by the next successful run. Run #3 wrote 6 rows covering hours run #2 hadn't seen. `raw_observations` grew from 17,675 to 17,692 with no intervention, and the dashboard stayed on its primary path (`feature_source: feature_store`).
+
+The idempotent-upsert design was adopted for network resilience during development; it turned out to also provide tolerance to scheduler unreliability. A pipeline ingesting only the most recent hour would have left permanent holes.
+
+**Mitigation** — a coarser fallback schedule on each workflow, since GitHub schedules less-frequent crons more dependably:
+
+| Workflow | Primary | Fallback |
+|---|---|---|
+| `feature_pipeline.yml` | `5 * * * *` | `25 */3 * * *` |
+| `training_pipeline.yml` | `30 0 * * *` | `45 12 * * *` |
+
 **Required GitHub Secrets:** `SUPABASE_URL`, `SUPABASE_KEY`
 
 Verified run — 46 seconds, 131 new hourly observations ingested and engineered without intervention:

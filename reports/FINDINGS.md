@@ -1164,3 +1164,78 @@ guard.
 **Lesson:** code that runs on a developer machine can silently depend on
 directory state created weeks earlier. CI, being stateless, is the only
 place that assumption gets tested.
+
+---
+
+# PART IX — Scheduler Behaviour in Practice
+
+## 33. Observed cron reliability
+
+Both workflows are correctly defined and both execute successfully when
+triggered. Scheduled execution, however, proved less frequent than requested.
+
+### Feature pipeline (`cron: 5 * * * *`, hourly)
+
+Observed over a 17-hour window from 2026-08-28 10:52 UTC:
+
+| Run | Trigger | Time (UTC) | Rows written |
+|---|---|---|---|
+| #1 | Manual | 2026-08-28 10:52 | 131 |
+| #2 | **Scheduled** | 2026-08-28 21:19 | 11 |
+| #3 | **Scheduled** | 2026-08-29 03:33 | 6 |
+
+Two scheduled runs in seventeen hours rather than seventeen. GitHub documents
+scheduled workflows as best-effort: they may be delayed or dropped during
+periods of high load, and high-frequency crons sit in the most contended
+tier.
+
+### Training pipeline (`cron: 30 0 * * *`, daily)
+
+As of 2026-08-29 04:14 UTC the 00:30 window had passed without triggering.
+The most recent registry artifacts date from the manual run at 11:55–11:58
+UTC on 28 August.
+
+## 34. Why this does not produce data gaps
+
+Each feature-pipeline run fetches a **seven-day trailing window** and upserts
+on `timestamp`. A missed hour is therefore backfilled by the next successful
+run rather than lost permanently. This is visible in the table above: run #3
+wrote 6 rows covering hours that run #2 had not yet seen.
+
+Verified: `raw_observations` grew from 17,675 to 17,692 rows with no manual
+intervention, and the feature store remained current enough for the dashboard
+to use its primary path (`feature_source: feature_store`) rather than the
+live fallback.
+
+**The idempotent-upsert design was chosen for network resilience during
+development and turned out to also provide tolerance to scheduler
+unreliability.** A pipeline that ingested only the most recent hour would
+have produced permanent holes under the same conditions.
+
+## 35. Mitigation
+
+A second, coarser schedule was added to each workflow:
+
+| Workflow | Primary | Fallback |
+|---|---|---|
+| `feature_pipeline.yml` | `5 * * * *` (hourly) | `25 */3 * * *` (3-hourly) |
+| `training_pipeline.yml` | `30 0 * * *` (daily 00:30) | `45 12 * * *` (daily 12:45) |
+
+GitHub schedules less-frequent crons more dependably, so the fallback is
+likely to fire when the primary does not. Concurrency groups prevent
+overlapping executions, and the idempotent upsert means a duplicate run is
+harmless.
+
+Pushing this change also resynchronises the workflow schedules on GitHub's
+side, which is the documented remedy when scheduled workflows stop
+triggering.
+
+## 36. Assessment against the requirement
+
+The brief specifies that the feature pipeline runs hourly and the training
+pipeline daily. Both are configured accordingly, both execute correctly, and
+both have been verified end to end. The gap between requested and delivered
+frequency is a platform characteristic rather than a defect in the pipeline,
+and the seven-day trailing-window design means it does not affect data
+completeness. Stating the observed behaviour openly is more useful than
+reporting only the configured schedule.
