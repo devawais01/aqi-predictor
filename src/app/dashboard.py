@@ -105,10 +105,17 @@ st.markdown("""
     [data-testid="stMetricLabel"] p {
         color: #7D8DA6 !important; font-size: 0.76rem !important;
         font-weight: 600 !important; letter-spacing: 0.06em;
-        text-transform: uppercase;
+        /* No uppercase transform: it converts the SI micro prefix (µ) to M,
+           silently turning µg/m3 into mg/m3 -- a factor of 1000. */
+        text-transform: none;
     }
     [data-testid="stMetricValue"] {
         font-weight: 700 !important; letter-spacing: -0.02em;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        font-size: clamp(1.35rem, 2.1vw, 2rem) !important;
+        line-height: 1.15 !important;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -363,13 +370,13 @@ def tab_forecast(forecast: dict, history: pd.DataFrame) -> None:
     with right:
         row1 = st.columns(3)
         row1[0].metric("Dominant pollutant", current["dominant_pollutant"])
-        row1[1].metric("PM2.5", f"{current['pm2_5']:.1f} µg/m³")
-        row1[2].metric("PM10", f"{current['pm10']:.1f} µg/m³")
+        row1[1].metric("PM2.5 · µg/m³", f"{current['pm2_5']:.1f}")
+        row1[2].metric("PM10 · µg/m³", f"{current['pm10']:.1f}")
 
         row2 = st.columns(3)
-        row2[0].metric("Temperature", f"{current['temperature_2m']:.1f} °C")
-        row2[1].metric("Humidity", f"{current['relative_humidity_2m']:.0f} %")
-        row2[2].metric("Wind", f"{current['wind_speed_10m']:.1f} km/h")
+        row2[0].metric("Temperature · °C", f"{current['temperature_2m']:.1f}")
+        row2[1].metric("Humidity · %", f"{current['relative_humidity_2m']:.0f}")
+        row2[2].metric("Wind · km/h", f"{current['wind_speed_10m']:.1f}")
 
         st.markdown("**Three-day forecast**")
         cards = st.columns(3)
