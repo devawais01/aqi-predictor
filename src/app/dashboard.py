@@ -16,6 +16,8 @@ import os
 import sys
 from datetime import datetime
 
+import pytz
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -57,16 +59,103 @@ ALERT_STYLES = {
 
 st.markdown("""
 <style>
-    .main > div { padding-top: 1rem; }
-    .metric-card {
-        background: #1a1c23; border-radius: 12px; padding: 1.2rem;
-        border-left: 5px solid #444; margin-bottom: 0.6rem;
+    /* Pull content up: Streamlit's default top padding wastes a third of the
+       first screen before any content appears. */
+    .block-container {
+        padding-top: 1.4rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 1350px;
     }
+    [data-testid="stHeader"] { background: transparent; height: 2.2rem; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0B1220 0%, #0A0F1C 100%);
+        border-right: 1px solid rgba(56, 189, 248, 0.14);
+    }
+
+    .hero-title {
+        font-size: 2.45rem; font-weight: 800; letter-spacing: -0.025em;
+        line-height: 1.1; margin: 0 0 0.35rem 0;
+        background: linear-gradient(100deg, #E5EDF7 0%, #38BDF8 55%, #6366F1 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    .hero-sub {
+        color: #7D8DA6; font-size: 0.9rem; letter-spacing: 0.012em;
+        margin: 0 0 0.2rem 0;
+    }
+    .hero-rule {
+        height: 2px; width: 100%; margin: 0.9rem 0 0.2rem 0;
+        background: linear-gradient(90deg, #38BDF8 0%, #6366F1 32%,
+                    rgba(99,102,241,0) 78%);
+        border-radius: 2px;
+    }
+
+    [data-testid="stMetric"] {
+        background: linear-gradient(145deg, rgba(30,41,59,0.55) 0%,
+                    rgba(17,24,39,0.55) 100%);
+        border: 1px solid rgba(56, 189, 248, 0.13);
+        border-radius: 13px; padding: 0.85rem 1rem;
+        transition: border-color 0.18s ease, transform 0.18s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        border-color: rgba(56, 189, 248, 0.34);
+        transform: translateY(-1px);
+    }
+    [data-testid="stMetricLabel"] p {
+        color: #7D8DA6 !important; font-size: 0.76rem !important;
+        font-weight: 600 !important; letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    [data-testid="stMetricValue"] {
+        font-weight: 700 !important; letter-spacing: -0.02em;
+    }
+
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 3px; border-bottom: 1px solid rgba(56,189,248,0.12);
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 9px 9px 0 0; padding: 0.5rem 1.05rem;
+        color: #7D8DA6; font-weight: 600; font-size: 0.9rem;
+    }
+    .stTabs [aria-selected="true"] {
+        background: rgba(56, 189, 248, 0.09); color: #38BDF8 !important;
+    }
+
     .alert-banner {
-        border-radius: 10px; padding: 1rem 1.3rem; margin: 0.6rem 0;
-        font-weight: 600; color: #fff;
+        border-radius: 13px; padding: 0.95rem 1.25rem;
+        margin: 0.5rem 0 0.9rem 0; font-weight: 600; font-size: 0.96rem;
+        color: #fff; border: 1px solid rgba(255,255,255,0.16);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.32);
     }
-    .footnote { color: #888; font-size: 0.82rem; }
+
+    .side-stat {
+        background: linear-gradient(145deg, rgba(30,41,59,0.5),
+                    rgba(17,24,39,0.5));
+        border: 1px solid rgba(56,189,248,0.14);
+        border-radius: 12px; padding: 0.75rem 0.9rem; margin-bottom: 0.6rem;
+    }
+    .side-stat-label {
+        color: #7D8DA6; font-size: 0.7rem; font-weight: 700;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        margin-bottom: 0.15rem;
+    }
+    .side-stat-value {
+        font-size: 1.85rem; font-weight: 700; line-height: 1.05;
+        letter-spacing: -0.02em;
+    }
+    .side-meta { color: #6B7A94; font-size: 0.76rem; line-height: 1.6; }
+    .side-meta code {
+        background: rgba(56,189,248,0.1); color: #38BDF8;
+        padding: 1px 5px; border-radius: 4px; font-size: 0.72rem;
+    }
+
+    div[data-testid="stExpander"] details {
+        border: 1px solid rgba(56,189,248,0.12);
+        border-radius: 11px; background: rgba(17,24,39,0.4);
+    }
+    .footnote { color: #6B7A94; font-size: 0.8rem; }
+    #MainMenu, footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -209,7 +298,7 @@ def forecast_chart(history: pd.DataFrame, forecast: dict) -> go.Figure:
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         xaxis_title="",
-        yaxis_title="US AQI",
+        yaxis_title="AQI (US EPA scale)",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.02)",
     )
@@ -465,7 +554,7 @@ def tab_eda(features: pd.DataFrame) -> None:
         showlegend=False,
     ), row=1, col=2)
 
-    figure.update_yaxes(title_text="US AQI", row=1, col=1)
+    figure.update_yaxes(title_text="AQI (US EPA scale)", row=1, col=1)
     figure.update_xaxes(title_text="hour (PKT)", row=1, col=2)
     figure.update_layout(height=380, margin=dict(t=50, b=40),
                          paper_bgcolor="rgba(0,0,0,0)")
@@ -503,7 +592,7 @@ def tab_about() -> None:
     st.markdown(f"""
 ### Pearls AQI Predictor — {config.CITY}, Pakistan
 
-Three-day US AQI forecasting on a fully serverless stack.
+Three-day AQI forecasting (US EPA scale) on a fully serverless stack.
 
 #### Architecture
 
@@ -547,16 +636,20 @@ licensed CC-BY 4.0.
 """)
 
 
-def main() -> None:
-    st.title("🌫️ Lahore Air Quality Forecast")
-    st.caption("Three-day US AQI prediction · direct multi-horizon models · "
-               "data by Open-Meteo (CC-BY 4.0)")
+def aqi_colour(value: float) -> str:
+    """Category colour for a given AQI, used in the sidebar readout."""
+    return CATEGORY_COLOURS.get(calc.category(value), "#38BDF8")
 
-    with st.sidebar:
-        st.header("Status")
-        if st.button("Refresh data", width="stretch"):
-            st.cache_data.clear()
-            st.rerun()
+
+def main() -> None:
+    st.markdown(
+        "<div class='hero-title'>Lahore Air Quality Forecast</div>"
+        "<div class='hero-sub'>Three-day AQI prediction on the US EPA scale "
+        "&middot; direct multi-horizon models &middot; data by Open-Meteo "
+        "(CC-BY 4.0)</div>"
+        "<div class='hero-rule'></div>",
+        unsafe_allow_html=True,
+    )
 
     try:
         forecast = load_forecast()
@@ -564,15 +657,66 @@ def main() -> None:
         st.error(f"Could not compute a forecast: {exc}")
         st.stop()
 
+    current = forecast["current"]
+    peak = forecast["peak_forecast_aqi"]
+    now_local = datetime.now(pytz.timezone(config.TIMEZONE))
+
     with st.sidebar:
-        st.metric("Current AQI", f"{forecast['current']['aqi']:.0f}")
-        st.metric("Worst over 72h", f"{forecast['peak_forecast_aqi']:.0f}")
-        st.caption(f"Source: `{forecast.get('feature_source', 'n/a')}`")
-        st.caption(f"Updated {datetime.now().strftime('%H:%M')}")
+        st.markdown(
+            f"<div class='side-stat'>"
+            f"<div class='side-stat-label'>Current AQI</div>"
+            f"<div class='side-stat-value' "
+            f"style='color:{aqi_colour(current['aqi'])}'>"
+            f"{current['aqi']:.0f}</div>"
+            f"<div class='side-meta'>{current['category']}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div class='side-stat'>"
+            f"<div class='side-stat-label'>Worst over 72 h</div>"
+            f"<div class='side-stat-value' style='color:{aqi_colour(peak)}'>"
+            f"{peak:.0f}</div>"
+            f"<div class='side-meta'>{calc.category(peak)}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        if st.button("Refresh data", width="stretch"):
+            st.cache_data.clear()
+            st.rerun()
+
+        st.markdown(
+            f"<div class='side-meta' style='margin-top:0.7rem'>"
+            f"Source <code>{forecast.get('feature_source', 'n/a')}</code><br/>"
+            f"Updated {now_local.strftime('%H:%M')} PKT "
+            f"&middot; {now_local.strftime('%d %b')}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
         st.markdown("---")
-        st.caption("Alert thresholds (US EPA)")
-        for name, value in config.ALERT_THRESHOLDS.items():
-            st.caption(f"· {name.replace('_', ' ').title()}: {value}+")
+        st.markdown(
+            "<div class='side-stat-label'>Alert thresholds (US EPA)</div>",
+            unsafe_allow_html=True,
+        )
+        tiers = [
+            ("Sensitive groups", 101, "#FF7E00"),
+            ("Unhealthy", 151, "#FF0000"),
+            ("Very unhealthy", 201, "#8F3F97"),
+            ("Hazardous", 301, "#7E0023"),
+        ]
+        rows = "".join(
+            f"<div style='display:flex;align-items:center;gap:8px;"
+            f"margin:5px 0;font-size:0.79rem;color:#8D9BB2'>"
+            f"<span style='width:9px;height:9px;border-radius:50%;"
+            f"background:{colour};display:inline-block'></span>"
+            f"{label}<span style='margin-left:auto;color:#6B7A94'>"
+            f"{threshold}+</span></div>"
+            for label, threshold, colour in tiers
+        )
+        st.markdown(f"<div style='margin-top:0.4rem'>{rows}</div>",
+                    unsafe_allow_html=True)
 
     tabs = st.tabs(["Forecast", "Model performance", "Explainability",
                     "Data analysis", "About"])

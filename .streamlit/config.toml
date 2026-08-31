@@ -1,0 +1,11 @@
+# Streamlit theme. Deep navy base with a cyan-blue accent.
+[theme]
+base = "dark"
+primaryColor = "#38BDF8"
+backgroundColor = "#0A0F1C"
+secondaryBackgroundColor = "#111827"
+textColor = "#E5EDF7"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
