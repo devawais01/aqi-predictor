@@ -10,6 +10,8 @@
 
 **Live app → [lahore-aqi-forecast.streamlit.app](https://lahore-aqi-forecast.streamlit.app)**
 
+> If the dashboard shows a "Zzzz — this app has gone to sleep" screen, click **"Yes, get this app back up!"**. Streamlit Community Cloud sleeps free apps after ~12 hours without traffic; it wakes in about 30 seconds. The hourly feature pipeline pings the URL to keep it warm, but a long gap between scheduled runs can still let it sleep.
+
 ---
 
 ## Contents

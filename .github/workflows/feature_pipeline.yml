@@ -44,6 +44,14 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python -m src.features.feature_pipeline --mode incremental
 
+      - name: Keep the dashboard awake
+        if: always()
+        continue-on-error: true
+        run: |
+          # Streamlit Community Cloud sleeps apps after ~12h without traffic.
+          # This request costs nothing and keeps the public URL responsive.
+          curl -s -o /dev/null -w "dashboard responded %{http_code} in %{time_total}s\n" \
+            --max-time 60 https://lahore-aqi-forecast.streamlit.app || true
       - name: Report feature store state
         if: always()
         env:
