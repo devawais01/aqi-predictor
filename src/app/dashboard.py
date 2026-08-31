@@ -566,7 +566,7 @@ def main() -> None:
 
     with st.sidebar:
         st.metric("Current AQI", f"{forecast['current']['aqi']:.0f}")
-        st.metric("Peak (72h)", f"{forecast['peak_forecast_aqi']:.0f}")
+        st.metric("Worst over 72h", f"{forecast['peak_forecast_aqi']:.0f}")
         st.caption(f"Source: `{forecast.get('feature_source', 'n/a')}`")
         st.caption(f"Updated {datetime.now().strftime('%H:%M')}")
         st.markdown("---")

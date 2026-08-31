@@ -280,7 +280,11 @@ def forecast(lookback_days: int = 14) -> dict:
         except Exception as exc:
             print(f"  +{horizon}h failed: {exc}")
 
-    peak = max([p["aqi"] for p in predictions], default=current_aqi)
+    # The peak must span the whole window including the present moment.
+    # Taking the max of the forecasts alone produced a "peak" lower than the
+    # current reading whenever air quality was forecast to improve, which is
+    # both wrong and alarming in the wrong direction.
+    peak = max([p["aqi"] for p in predictions] + [current_aqi])
 
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
