@@ -1239,3 +1239,68 @@ frequency is a platform characteristic rather than a defect in the pipeline,
 and the seven-day trailing-window design means it does not affect data
 completeness. Stating the observed behaviour openly is more useful than
 reporting only the configured schedule.
+
+---
+
+# PART X — Three Days of Autonomous Operation
+
+## 37. Scheduler settled after an activation lag
+
+The conclusion in §33 was premature. Extended observation:
+
+| Workflow | Scheduled runs | Window | Duration |
+|---|---|---|---|
+| `feature_pipeline.yml` | **21** | 28–31 Aug 2026 | 37–56 s |
+| `training_pipeline.yml` | **4** | 29–31 Aug 2026 | 4m24s – 5m37s |
+
+All green. Feature cadence settled at roughly one run every 90 minutes to
+3 hours; training fired on both primary and fallback windows.
+
+Raw table: 17,544 → **17,741 rows**. Models retrained **four times**. No
+human intervention.
+
+**The lesson repeats §10's:** a two-run sample supported a confident and
+incorrect conclusion. Twenty-one runs told a different story.
+
+## 38. Selection is stable under automated retraining
+
+| Horizon | 28 Aug (17,507 rows) | R² | 30 Aug (17,561 rows) | R² |
+|---|---|---|---|---|
+| +24h | XGBoost | 0.604 | XGBoost | **0.609** |
+| +48h | Ridge | 0.342 | Ridge | 0.338 |
+| +72h | Ridge | 0.309 | Ridge | **0.311** |
+
+Same model every horizon, R² drift ≤ 0.005. Given the LSTM's 0.556 R²
+instability, this could not have been assumed — it had to be measured.
+
+## 39. Bug: peak forecast excluded the present
+
+The sidebar showed `Current AQI 153` alongside `Peak (72h) 145` — a peak
+below the current reading.
+
+```python
+# before
+peak = max([p["aqi"] for p in predictions])
+# after
+peak = max([p["aqi"] for p in predictions] + [current_aqi])
+```
+
+The maximum spanned the three forecast horizons only. Defensible read in
+isolation, and invisible for most of development because Lahore's AQI was
+usually forecast to worsen, so some horizon exceeded the present. It
+surfaced on the first day the forecast fell at all three horizons.
+
+Metric renamed **"Worst over 72h"** — what a user actually needs.
+
+**Lesson:** a boundary condition requiring an uncommon forecast shape. No
+synthetic unit test would plausibly have caught it. Found by looking at the
+running product on an ordinary day. Deployed systems should be watched, not
+merely tested.
+
+## 40. Streamlit Cloud sleep
+
+Free apps suspend after ~12 hours without traffic, showing a "Zzzz" screen
+before the dashboard loads. Mitigated by adding a `curl` step to the hourly
+workflow (`continue-on-error: true`, so a dashboard outage can never fail
+the data pipeline), and documented in the README for readers who still hit
+it.
