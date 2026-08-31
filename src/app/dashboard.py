@@ -326,10 +326,17 @@ def render_alerts(forecast: dict) -> None:
     peak = max(alerts, key=lambda a: a[2]["severity"])
     icon, colour, label = ALERT_STYLES[peak[2]["severity"]]
 
+    peak_value = forecast["peak_forecast_aqi"]
+    current_value = current["aqi"]
+    if peak_value > current_value + 0.5:
+        summary = (f"worst AQI {peak_value:.0f} expected within 72 hours")
+    else:
+        summary = (f"AQI {current_value:.0f} now; forecast to improve over "
+                   f"the next 72 hours")
+
     st.markdown(
         f"<div class='alert-banner' style='background:{colour}'>"
-        f"{icon} <strong>{label}</strong> &mdash; peak AQI "
-        f"{forecast['peak_forecast_aqi']:.0f} within 72 hours. "
+        f"{icon} <strong>{label}</strong> &mdash; {summary}. "
         f"{peak[2]['message']}</div>",
         unsafe_allow_html=True,
     )
