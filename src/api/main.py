@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src import config
 from src.models import predict as predictor
-from src.utils import db_client
+from src.utils import db_client, openweather
 
 app = FastAPI(
     title="Pearls AQI Predictor",
@@ -73,7 +73,7 @@ def root() -> dict:
         "horizons_hours": config.HORIZONS,
         "endpoints": [
             "/health", "/predict", "/current", "/historical",
-            "/metrics", "/models", "/alerts", "/docs",
+                        "/metrics", "/models", "/alerts", "/crosscheck", "/docs",
         ],
         "data_source": "Open-Meteo (CC-BY 4.0)",
     }
@@ -229,4 +229,45 @@ def get_alerts() -> dict:
         "max_severity": max([a["severity"] for a in alerts], default=0),
         "alerts": alerts,
         "thresholds": config.ALERT_THRESHOLDS,
+    }
+
+@app.get("/crosscheck")
+def get_crosscheck() -> dict:
+    """Cross-validate current conditions against a second provider.
+
+    Open-Meteo supplies all data used by the models. OpenWeather is queried
+    independently for the same location and hour, and its pollutant
+    concentrations are scored with the same EPA implementation, so any
+    divergence reflects the measurements rather than the index definition.
+    """
+    if not openweather.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="OPENWEATHER_API_KEY is not configured.",
+        )
+    try:
+        primary = _cached("forecast", predictor.forecast)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    comparison = _cached("crosscheck",
+                         lambda: openweather.compare(primary["current"]))
+    if comparison is None:
+        raise HTTPException(
+            status_code=502,
+            detail="OpenWeather did not return usable data.",
+        )
+
+    return {
+        "city": config.CITY,
+        "primary": {
+            "provider": "Open-Meteo",
+            "observed_at_local": primary["observation_time_local"],
+            "aqi": primary["current"]["aqi"],
+            "computed_aqi": primary["current"]["computed_aqi"],
+            "pm2_5": primary["current"]["pm2_5"],
+            "pm10": primary["current"]["pm10"],
+            "dominant_pollutant": primary["current"]["dominant_pollutant"],
+        },
+        **comparison,
     }
