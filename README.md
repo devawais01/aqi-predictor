@@ -40,6 +40,7 @@ Lahore's air is persistently hazardous. Across 17,376 hourly observations spanni
 **What's in the box**
 
 - Automated hourly ingestion from Open-Meteo into a Supabase feature store
+- Independent cross-validation against OpenWeather, scored with the same EPA implementation
 - Two years of backfilled history (17,675 raw observations)
 - 70 engineered features with a **programmatically enforced leakage audit**
 - Five model families — persistence, SARIMAX, Ridge, Random Forest, XGBoost, LSTM
@@ -136,6 +137,7 @@ Supabase Storage  "model-registry"
 | Layer | Technology | Why |
 |-------|-----------|-----|
 | Data | Open-Meteo archive + air-quality APIs | Free, no API key, hourly, decades of archive |
+| Cross-validation | OpenWeather Air Pollution API | Independent second source for current conditions |
 | Feature store | Supabase Postgres (jsonb) | Stable free tier; direct SQL for validation and EDA |
 | Model registry | Supabase Storage | Versioned artifacts, same credentials |
 | Orchestration | GitHub Actions | Unlimited minutes on public repos, no server |
@@ -263,6 +265,21 @@ Fold-level results prove this empirically. Fold 1 trains on ~9.5 months — one 
 | 1 | ~9.5 months | **−0.945** |
 | 2 | ~12 months | 0.240 |
 | 3 | ~15 months | 0.351 |
+
+### 6b. Independent cross-validation against a second provider
+
+Open-Meteo supplies every value the models use. OpenWeather is queried separately for the same location and hour, and **its concentrations are scored with the same EPA implementation** — so any difference reflects the measurements, not the index definition.
+
+| Source | PM2.5 | PM10 | AQI | Basis |
+|---|---|---|---|---|
+| Open-Meteo (primary) | 51.3 µg/m³ | 75.7 | 152 | 24-hour rolling mean |
+| OpenWeather (independent) | 48.1 µg/m³ | 113.5 | 132 | instantaneous |
+
+**Agreement is judged on concentration, not on AQI.** The two index values rest on different averaging windows: EPA defines the PM2.5 sub-index against a 24-hour rolling mean, which Open-Meteo applies, whereas OpenWeather returns a single instantaneous reading. Comparing them directly would overstate the disagreement.
+
+On the fair comparison the sources agree to within **3.2 µg/m³, about 6%** — good agreement between independent sensor networks. The 20-point AQI gap is arithmetic, not disagreement: the index climbs roughly 2.5 points per µg/m³ in this band, so a 3 µg/m³ difference alone accounts for about 8 points, and the averaging-window mismatch supplies the rest.
+
+This is the same trap described in the AQI computation section below, encountered from the opposite direction.
 
 ### 7. EPA AQI computed from first principles
 
@@ -452,6 +469,7 @@ Base URL when running locally: `http://127.0.0.1:8000`
 | `GET /metrics` | Model performance from the registry |
 | `GET /models` | Selected model per horizon **and the selection rationale** |
 | `GET /alerts` | Active health alerts across the forecast window |
+| `GET /crosscheck` | Compare current conditions against an independent second provider |
 | `GET /docs` | Interactive OpenAPI documentation |
 
 <details>
