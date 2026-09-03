@@ -10,7 +10,7 @@
 
 **Live app → [lahore-aqi-forecast.streamlit.app](https://lahore-aqi-forecast.streamlit.app)**
 
-> If the dashboard shows a "Zzzz — this app has gone to sleep" screen, click **"Yes, get this app back up!"**. Streamlit Community Cloud sleeps free apps after ~12 hours without traffic; it wakes in about 30 seconds. The hourly feature pipeline pings the URL to keep it warm, but a long gap between scheduled runs can still let it sleep.
+> **If the dashboard shows a "Zzzz" screen**, click **"Yes, get this app back up!"** — it wakes in about 30 seconds. Streamlit Community Cloud suspends free apps after roughly 12 hours without a browser session. An HTTP ping from the hourly workflow does not reliably prevent this, because the sleep timer tracks WebSocket sessions rather than plain requests. Waking the app is a single click and the underlying pipeline continues running regardless.
 
 ---
 
